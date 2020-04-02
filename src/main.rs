@@ -247,6 +247,7 @@ impl<'a> Telegram<'_> {
         rename.insert("Japan".to_string(), "JPN".to_string());
         rename.insert("US".to_string(), "USA".to_string());
         rename.insert("Spain".to_string(), "ESP".to_string());
+        rename.insert("France".to_string(), "FRA".to_string());
 
         Telegram {
             base_url: base_url,
