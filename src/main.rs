@@ -86,13 +86,10 @@ struct BobCov {
     regions: Vec<BobCovRegion>,
 }
 
-type BobData = Vec<BobCov>;
-
 #[derive(serde::Serialize, serde::Deserialize)]
 struct TelegramChannel {
     id: i64,
     name: String,
-    include: std::collections::HashSet<String>,
     interval: std::time::Duration,
     #[serde(default)]
     test: bool,
@@ -137,13 +134,12 @@ impl Client {
 
 #[async_trait]
 trait Service<'a> {
-    async fn process(&self);
+    async fn process(&self, cov: &BobCov);
 }
 
 struct Telegram<'a> {
     base_url: String,
     data: TelegramData,
-    cov: &'a BobData,
     client: &'a Client,
     test: bool,
 }
@@ -157,7 +153,7 @@ impl<'a> Telegram<'_> {
         url(&self.base_url, relative)
     }
 
-    async fn new(key: String, cov: &'a BobData, client: &'a Client, test: bool) -> Telegram<'a> {
+    async fn new(key: String, client: &'a Client, test: bool) -> Telegram<'a> {
         let base_url = format!("https://api.telegram.org/bot{key}/", key = key);
         let bot_id: i64 = key[..key.find(':').unwrap()].to_string().parse().unwrap();
 
@@ -188,15 +184,9 @@ impl<'a> Telegram<'_> {
                 data.channels.remove(data.channels.iter().position(|channel| channel.id == chat.id).unwrap());
                 channel_ids.remove(&chat.id);
             } else if !channel_ids.contains(&chat.id) {
-                let mut include = std::collections::HashSet::new();
-                include.insert("China".to_string());
-                include.insert("Germany".to_string());
-                include.insert("US".to_string());
-                include.insert("Italy".to_string());
                 data.channels.push(TelegramChannel {
                     id: chat.id.clone(),
                     name: chat.title.as_ref().unwrap().clone(),
-                    include: include,
                     interval: time::Duration::from_secs(21600),
                     test: false,
                 });
@@ -213,13 +203,12 @@ impl<'a> Telegram<'_> {
         Telegram {
             base_url: base_url,
             data: data,
-            cov: cov,
             client: client,
             test: test,
         }
     }
 
-    async fn process(&self, channel: &TelegramChannel) {
+    async fn process(&self, cov: &BobCov, channel: &TelegramChannel) {
         let url = self.url("sendPhoto");
 
         let width = 580;
@@ -261,7 +250,7 @@ impl<'a> Telegram<'_> {
             draw_entry(recovered_percent_x, y, &format!("{:5.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64));
         };
 
-        for (index, region) in self.cov.last().unwrap().regions.iter().enumerate() {
+        for (index, region) in cov.regions.iter().enumerate() {
             let y = init_y + (index as u32 + 1) * 20;
             if height - y < 50 {
                 break;
@@ -288,7 +277,7 @@ impl<'a> Telegram<'_> {
 
 #[async_trait]
 impl Service<'_> for Telegram<'_> {
-    async fn process(&self) {
+    async fn process(&self, cov: &BobCov) {
         if !self.test {
             thread::sleep(time::Duration::from_secs(10));
         }
@@ -304,7 +293,7 @@ impl Service<'_> for Telegram<'_> {
             }
 
             println!("Sending to {}", channel.name);
-            self.process(channel).await;
+            self.process(cov, channel).await;
         }
     }
 }
@@ -351,24 +340,17 @@ async fn main() {
             thread::sleep(dur);
         }
 
-        let mut cov = load_data("cov", vec!());
-
         let client = Client {
             client: reqwest::Client::new(),
         };
 
-        cov.push(get_cov_data(&client).await);
+        let cov = get_cov_data(&client).await;
 
-        {
-            let service: Box<dyn Service<'_>> = Box::new(Telegram::new(key.to_string(), &cov, &client, test).await);
+        let service: Box<dyn Service<'_>> = Box::new(Telegram::new(key.to_string(), &client, test).await);
+        service.process(&cov).await;
 
-            service.process().await;
-        }
-
-        if !test {
-            save_data("cov", &cov);
-        } else {
-            break
+        if test {
+            break;
         }
     }
 }
