@@ -105,29 +105,6 @@ struct TelegramData {
     channels: Vec<TelegramChannel>,
 }
 
-struct BobDisplayRegion {
-    region: String,
-    confirmed: i64,
-    deaths: i64,
-    recovered: i64,
-}
-
-fn format(regions: &Vec<BobDisplayRegion>) -> String {
-    let mut lines = vec!();
-    lines.push(format!("{:<4}{:>7}{:>6}{:>6}{:>6}{:>6}", "", "C", "D", "R", "D%", "R%"));
-    for region in regions.iter() {
-        lines.push(format!("{:4}{:7}{:6}{:6}{:5.1}%{:5.1}%",
-            region.region,
-            region.confirmed,
-            region.deaths,
-            region.recovered,
-            100.0 * region.deaths as f64 / region.confirmed as f64,
-            100.0 * region.recovered as f64 / region.confirmed as f64
-        ));
-    }
-    format!("```\n{}\n```", lines.join("\n"))
-}
-
 fn load_data<T: serde::de::DeserializeOwned>(path: &str, default: T) -> T {
     if !std::path::Path::new(path).exists() {
         return default;
@@ -146,15 +123,15 @@ struct Client {
 
 impl Client {
     async fn get<T>(&self, url: &str) -> T where for<'de> T: serde::Deserialize<'de> {
-        println!("Post: {}", url);
+        println!("GET: {}", url);
         let response = self.client.get(url).send().await.unwrap();
         let json = response.text().await.unwrap();
         serde_json::from_str::<T>(&json).unwrap()
     }
 
-    async fn post_form(&self, url: &str, params: &Vec<(String, String)>) {
-        println!("Post: {}", url);
-        self.client.post(url).form(params).send().await.unwrap();
+    async fn post_multipart(&self, url: &str, form: reqwest::multipart::Form) {
+        println!("POST (multipart): {}", url);
+        self.client.post(url).multipart(form).send().await.unwrap();
     }
 }
 
@@ -168,7 +145,7 @@ struct Telegram<'a> {
     data: TelegramData,
     cov: &'a BobData,
     client: &'a Client,
-    rename: std::collections::HashMap<String, String>,
+    test: bool,
 }
 
 fn url(base: &str, relative: &str) -> String {
@@ -233,79 +210,88 @@ impl<'a> Telegram<'_> {
             data.channels.retain(|channel| channel.test);
         }
 
-        let mut rename = std::collections::HashMap::new();
-        rename.insert("China".to_string(), "CHN".to_string());
-        rename.insert("Hong Kong".to_string(), "HKG".to_string());
-        rename.insert("United Arab Emirates".to_string(), "ARE".to_string());
-        rename.insert("Sri Lanka".to_string(), "LKA".to_string());
-        rename.insert("Korea, South".to_string(), "KOR".to_string());
-        rename.insert("Australia".to_string(), "AUS".to_string());
-        rename.insert("Singapore".to_string(), "SGP".to_string());
-        rename.insert("Philippines".to_string(), "PHL".to_string());
-        rename.insert("Italy".to_string(), "ITA".to_string());
-        rename.insert("Germany".to_string(), "DEU".to_string());
-        rename.insert("Japan".to_string(), "JPN".to_string());
-        rename.insert("US".to_string(), "USA".to_string());
-        rename.insert("Spain".to_string(), "ESP".to_string());
-        rename.insert("France".to_string(), "FRA".to_string());
-
         Telegram {
             base_url: base_url,
             data: data,
             cov: cov,
             client: client,
-            rename: rename,
+            test: test,
         }
     }
 
     async fn process(&self, channel: &TelegramChannel) {
-        let url = self.url("sendMessage");
+        let url = self.url("sendPhoto");
 
-        let mut values: Vec<BobDisplayRegion> = vec!();
-        let mut total = BobDisplayRegion {
+        let width = 580;
+        let height = 800;
+        let mut img: image::RgbImage = image::ImageBuffer::new(width, height);
+        let font_pixel = image::Rgb([0xC0u8, 0xC0u8, 0xC0u8]);
+        let scale = rusttype::Scale {
+            x: 18.0,
+            y: 18.0,
+        };
+
+        let font = rusttype::FontCollection::from_bytes(Vec::from(include_bytes!("Inconsolata.ttf") as &[u8]))
+            .unwrap()
+            .into_font()
+            .unwrap();
+
+        let init_y = 50;
+        let region_x = 50;
+        let confirmed_x = 200;
+        let deaths_x = 260;
+        let deaths_percent_x = 340;
+        let recovered_x = 400;
+        let recovered_percent_x = 480;
+
+        let mut total = BobCovRegion {
             region: "*".to_string(),
             confirmed: 0,
             deaths: 0,
             recovered: 0,
         };
 
-        for region in self.cov.last().unwrap().regions.iter() {
+        let mut draw_entry = |x, y, text: &str| imageproc::drawing::draw_text_mut(&mut img, font_pixel, x, y, scale, &font, text);
+        let mut draw_region = |y, region: &BobCovRegion| {
+            draw_entry(region_x, y, &region.region);
+            draw_entry(confirmed_x, y, &format!("{:8}", region.confirmed));
+            draw_entry(deaths_x, y, &format!("{:8}", region.deaths));
+            draw_entry(deaths_percent_x, y, &format!("{:5.1}%", 100.0 * region.deaths as f64 / region.confirmed as f64));
+            draw_entry(recovered_x, y, &format!("{:8}", region.recovered));
+            draw_entry(recovered_percent_x, y, &format!("{:5.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64));
+        };
+
+        for (index, region) in self.cov.last().unwrap().regions.iter().enumerate() {
+            let y = init_y + (index as u32 + 1) * 20;
+            if height - y < 50 {
+                break;
+            }
+
             total.confirmed += region.confirmed;
             total.deaths += region.deaths;
             total.recovered += region.recovered;
 
-            if channel.include.contains(&region.region) {
-                values.push(BobDisplayRegion {
-                    region: if self.rename.contains_key(&region.region) {
-                        self.rename[&region.region].to_string()
-                    } else {
-                        region.region.clone()
-                    },
-                    confirmed: region.confirmed,
-                    deaths: region.deaths,
-                    recovered: region.recovered,
-                });
-            }
+            draw_region(y, region);
         }
+        draw_region(init_y, &total);
 
-        values.push(total);
-        values.sort_unstable_by(|lhs, rhs| rhs.confirmed.cmp(&lhs.confirmed));
-        let message = format(&values);
+        let mut buffer = Vec::new();
+        image::DynamicImage::ImageRgb8(img).write_to(&mut buffer, image::ImageOutputFormat::Png).unwrap();
+        let form = reqwest::multipart::Form::new()
+            .part("chat_id", reqwest::multipart::Part::text(channel.id.to_string()))
+            .part("disable_notification", reqwest::multipart::Part::text("true"))
+            .part("photo", reqwest::multipart::Part::bytes(buffer).file_name("test.png"));
 
-        let params = vec![
-            ("chat_id".to_string(), channel.id.to_string()),
-            ("text".to_string(), message.to_string()),
-            ("parse_mode".to_string(), "Markdown".to_string()),
-            ("disable_notification".to_string(), "true".to_string()),
-        ];
-        self.client.post_form(&url, &params).await;
+        self.client.post_multipart(&url, form).await;
     }
 }
 
 #[async_trait]
 impl Service<'_> for Telegram<'_> {
     async fn process(&self) {
-        thread::sleep(time::Duration::from_secs(10));
+        if !self.test {
+            thread::sleep(time::Duration::from_secs(10));
+        }
 
         let seconds = time::SystemTime::now().duration_since(time::UNIX_EPOCH).unwrap().as_secs() as u64;
         let interval_count = seconds / LOOP_INTERVAL;
