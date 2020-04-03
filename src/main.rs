@@ -226,12 +226,12 @@ impl<'a> Telegram<'_> {
             .unwrap();
 
         let init_y = 50;
-        let region_x = 50;
-        let confirmed_x = 200;
-        let deaths_x = 260;
-        let deaths_percent_x = 340;
-        let recovered_x = 400;
-        let recovered_percent_x = 480;
+        let region_x = 48;
+        let confirmed_x = 186;
+        let deaths_x = 266;
+        let deaths_percent_x = 346;
+        let recovered_x = 406;
+        let recovered_percent_x = 486;
 
         let mut total = BobCovRegion {
             region: "*".to_string(),
@@ -240,14 +240,25 @@ impl<'a> Telegram<'_> {
             recovered: 0,
         };
 
+        for x in (region_x - 1) .. (width - region_x - 1) {
+            img.put_pixel(x, 49, font_pixel);
+        }
+
         let mut draw_entry = |x, y, text: &str| imageproc::drawing::draw_text_mut(&mut img, font_pixel, x, y, scale, &font, text);
+        draw_entry(region_x, 30, "Region");
+        draw_entry(confirmed_x, 30, "   Cases");
+        draw_entry(deaths_x, 30, "    Dead");
+        draw_entry(deaths_percent_x, 30, "    %");
+        draw_entry(recovered_x, 30, "  Healed");
+        draw_entry(recovered_percent_x, 30, "    %");
+
         let mut draw_region = |y, region: &BobCovRegion| {
             draw_entry(region_x, y, &region.region);
             draw_entry(confirmed_x, y, &format!("{:8}", region.confirmed));
             draw_entry(deaths_x, y, &format!("{:8}", region.deaths));
-            draw_entry(deaths_percent_x, y, &format!("{:5.1}%", 100.0 * region.deaths as f64 / region.confirmed as f64));
+            draw_entry(deaths_percent_x, y, &format!("{:4.1}%", 100.0 * region.deaths as f64 / region.confirmed as f64));
             draw_entry(recovered_x, y, &format!("{:8}", region.recovered));
-            draw_entry(recovered_percent_x, y, &format!("{:5.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64));
+            draw_entry(recovered_percent_x, y, &format!("{:4.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64));
         };
 
         for (index, region) in cov.regions.iter().enumerate() {
