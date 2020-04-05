@@ -320,15 +320,6 @@ fn make_image(cov: BobCov) -> Vec<u8> {
     let recovered_x = 406;
     let recovered_percent_x = 486;
 
-    let mut total = BobCovRegion {
-        region: "*".to_string(),
-        confirmed: 0,
-        deaths: 0,
-        recovered: 0,
-    };
-
-    let mut regions = vec!();
-
     for x in (region_x - 1) .. (width - region_x - 1) {
         img.put_pixel(x, 49, font_pixel);
     }
@@ -350,14 +341,86 @@ fn make_image(cov: BobCov) -> Vec<u8> {
         draw_entry(recovered_percent_x, y, &format!("{:4.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64));
     };
 
+    let mut regions = vec!();
+
+    let mut total = BobCovRegion {
+        region: "*".to_string(),
+        confirmed: 0,
+        deaths: 0,
+        recovered: 0,
+    };
+
+    let mut groups = std::collections::HashMap::new();
+
+    let mut eu = std::collections::HashSet::new();
+    eu.insert("Austria".to_string());
+    eu.insert("Belgium".to_string());
+    eu.insert("Bulgaria".to_string());
+    eu.insert("Croatia".to_string());
+    eu.insert("Cyprus".to_string());
+    eu.insert("Czechia".to_string());
+    eu.insert("Denmark".to_string());
+    eu.insert("Estonia".to_string());
+    eu.insert("Finland".to_string());
+    eu.insert("France".to_string());
+    eu.insert("Germany".to_string());
+    eu.insert("Greece".to_string());
+    eu.insert("Hungary".to_string());
+    eu.insert("Ireland".to_string());
+    eu.insert("Italy".to_string());
+    eu.insert("Latvia".to_string());
+    eu.insert("Lithuania".to_string());
+    eu.insert("Luxembourg".to_string());
+    eu.insert("Malta".to_string());
+    eu.insert("Netherlands".to_string());
+    eu.insert("Poland".to_string());
+    eu.insert("Portugal".to_string());
+    eu.insert("Romania".to_string());
+    eu.insert("Slovakia".to_string());
+    eu.insert("Slovenia".to_string());
+    eu.insert("Spain".to_string());
+    eu.insert("Sweden".to_string());
+
+    groups.insert("EU".to_string(), eu);
+
+    let mut group_regions = std::collections::HashMap::new();
+
+    for label in groups.keys() {
+        group_regions.insert(label, BobCovRegion {
+            region: label.to_string(),
+            confirmed: 0,
+            deaths: 0,
+            recovered: 0,
+        });
+    }
+
     for region in cov.regions.iter() {
+        regions.push(region);
+
         total.confirmed += region.confirmed;
         total.deaths += region.deaths;
         total.recovered += region.recovered;
 
-        regions.push(region);
+        for (label, group) in groups.iter() {
+            if group.contains(&region.region) {
+                match group_regions.get_mut(label) {
+                    Some(group_region) => {
+                        group_region.confirmed += region.confirmed;
+                        group_region.deaths += region.deaths;
+                        group_region.recovered += region.recovered;
+                    },
+                    None => {},
+                };
+            }
+        }
     }
+
     regions.push(&total);
+
+    for group in group_regions.values() {
+        regions.push(group);
+    }
+
     regions.sort_unstable_by(|lhs, rhs| rhs.confirmed.cmp(&lhs.confirmed));
 
     for (index, region) in regions.iter().enumerate() {
