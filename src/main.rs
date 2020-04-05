@@ -24,6 +24,15 @@ struct TelegramMember {
 }
 
 #[derive(serde::Deserialize)]
+struct TelegramFile {
+    file_id: String,
+    //file_unique_id: String,
+    //file_size: u32,
+    //width: u32,
+    //height: u32,
+}
+
+#[derive(serde::Deserialize)]
 struct TelegramMessage {
     //message_id: String,
     chat: TelegramChat,
@@ -35,6 +44,8 @@ struct TelegramMessage {
     left_chat_member: Option<TelegramMember>,
     //#[serde(default)]
     //group_chat_created: Option<bool>,
+    #[serde(default)]
+    photo: Option<Vec<TelegramFile>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -44,9 +55,9 @@ struct TelegramUpdate {
 }
 
 #[derive(serde::Deserialize)]
-struct TelegramUpdates {
+struct TelegramResponse<T> {
     //ok: bool,
-    result: Vec<TelegramUpdate>,
+    result: Option<T>,
 }
 
 #[derive(serde::Deserialize)]
@@ -126,15 +137,20 @@ impl Client {
         serde_json::from_str::<T>(&json).unwrap()
     }
 
-    async fn post_multipart(&self, url: &str, form: reqwest::multipart::Form) {
+    async fn post_multipart<T: serde::de::DeserializeOwned>(&self, url: &str, form: reqwest::multipart::Form) -> T {
         println!("POST (multipart): {}", url);
-        self.client.post(url).multipart(form).send().await.unwrap();
+        serde_json::from_str(&self.client.post(url).multipart(form).send().await.unwrap().text().await.unwrap()).unwrap()
+    }
+
+    async fn post_multipart_void(&self, url: &str, form: reqwest::multipart::Form) {
+        println!("POST (multipart): {}", url);
+        &self.client.post(url).multipart(form).send().await;
     }
 }
 
 #[async_trait]
 trait Service<'a> {
-    async fn process(&self, cov: &BobCov);
+    async fn process(&self, image: &Vec<u8>);
 }
 
 struct Telegram<'a> {
@@ -167,8 +183,8 @@ impl<'a> Telegram<'_> {
             channel_ids.insert(channel.id.clone());
         }
 
-        let updates: TelegramUpdates = client.get(&url(&base_url, "getUpdates")).await;
-        for update in updates.result.iter() {
+        let updates: TelegramResponse<Vec<TelegramUpdate>> = client.get(&url(&base_url, "getUpdates")).await;
+        for update in updates.result.unwrap().iter() {
             let message = &update.message;
             if message.date <= data.date {
                 continue;
@@ -208,87 +224,32 @@ impl<'a> Telegram<'_> {
         }
     }
 
-    async fn process(&self, cov: &BobCov, channel: &TelegramChannel) {
+    async fn process_image(&self, image: &Vec<u8>, channel: &TelegramChannel) -> String {
         let url = self.url("sendPhoto");
 
-        let width = 580;
-        let height = 800;
-        let mut img: image::RgbImage = image::ImageBuffer::new(width, height);
-        let font_pixel = image::Rgb([0xC0u8, 0xC0u8, 0xC0u8]);
-        let scale = rusttype::Scale {
-            x: 18.0,
-            y: 18.0,
-        };
-
-        let font = rusttype::FontCollection::from_bytes(Vec::from(include_bytes!("Inconsolata.ttf") as &[u8]))
-            .unwrap()
-            .into_font()
-            .unwrap();
-
-        let init_y = 50;
-        let region_x = 48;
-        let confirmed_x = 186;
-        let deaths_x = 266;
-        let deaths_percent_x = 346;
-        let recovered_x = 406;
-        let recovered_percent_x = 486;
-
-        let mut total = BobCovRegion {
-            region: "*".to_string(),
-            confirmed: 0,
-            deaths: 0,
-            recovered: 0,
-        };
-
-        for x in (region_x - 1) .. (width - region_x - 1) {
-            img.put_pixel(x, 49, font_pixel);
-        }
-
-        let mut draw_entry = |x, y, text: &str| imageproc::drawing::draw_text_mut(&mut img, font_pixel, x, y, scale, &font, text);
-        draw_entry(region_x, 30, "Region");
-        draw_entry(confirmed_x, 30, "   Cases");
-        draw_entry(deaths_x, 30, "    Dead");
-        draw_entry(deaths_percent_x, 30, "    %");
-        draw_entry(recovered_x, 30, "  Healed");
-        draw_entry(recovered_percent_x, 30, "    %");
-
-        let mut draw_region = |y, region: &BobCovRegion| {
-            draw_entry(region_x, y, &region.region);
-            draw_entry(confirmed_x, y, &format!("{:8}", region.confirmed));
-            draw_entry(deaths_x, y, &format!("{:8}", region.deaths));
-            draw_entry(deaths_percent_x, y, &format!("{:4.1}%", 100.0 * region.deaths as f64 / region.confirmed as f64));
-            draw_entry(recovered_x, y, &format!("{:8}", region.recovered));
-            draw_entry(recovered_percent_x, y, &format!("{:4.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64));
-        };
-
-        for (index, region) in cov.regions.iter().enumerate() {
-            let y = init_y + (index as u32 + 1) * 20;
-            if height - y < 50 {
-                break;
-            }
-
-            total.confirmed += region.confirmed;
-            total.deaths += region.deaths;
-            total.recovered += region.recovered;
-
-            draw_region(y, region);
-        }
-        draw_region(init_y, &total);
-
-        let mut buffer = Vec::new();
-        image::DynamicImage::ImageRgb8(img).write_to(&mut buffer, image::ImageOutputFormat::Png).unwrap();
         let form = reqwest::multipart::Form::new()
             .part("chat_id", reqwest::multipart::Part::text(channel.id.to_string()))
             .part("disable_notification", reqwest::multipart::Part::text("true"))
-            .part("photo", reqwest::multipart::Part::bytes(buffer).file_name("test.png"));
+            .part("photo", reqwest::multipart::Part::bytes(image.clone()).file_name("test.png"));
 
-        self.client.post_multipart(&url, form).await;
+        self.client.post_multipart::<TelegramResponse<TelegramMessage>>(&url, form).await.result.unwrap().photo.unwrap()[1].file_id.clone()
+    }
+
+    async fn process_id(&self, file_id: &String, channel: &TelegramChannel) {
+        let url = self.url("sendPhoto");
+
+        let form = reqwest::multipart::Form::new()
+            .part("chat_id", reqwest::multipart::Part::text(channel.id.to_string()))
+            .part("disable_notification", reqwest::multipart::Part::text("true"))
+            .part("photo", reqwest::multipart::Part::text(file_id.clone()));
+
+        self.client.post_multipart_void(&url, form).await;
     }
 }
 
 #[async_trait]
 impl Service<'_> for Telegram<'_> {
-    async fn process(&self, cov: &BobCov) {
+    async fn process(&self, image: &Vec<u8>) {
         if !self.test {
             thread::sleep(time::Duration::from_secs(10));
         }
@@ -296,6 +257,7 @@ impl Service<'_> for Telegram<'_> {
         let seconds = time::SystemTime::now().duration_since(time::UNIX_EPOCH).unwrap().as_secs() as u64;
         let interval_count = seconds / LOOP_INTERVAL;
 
+        let mut file_id: Option<String> = None;
         for channel in self.data.channels.iter() {
             let channel_interval_diff = channel.interval.as_secs() / LOOP_INTERVAL;
             let check = interval_count / channel_interval_diff * channel_interval_diff;
@@ -304,7 +266,12 @@ impl Service<'_> for Telegram<'_> {
             }
 
             println!("Sending to {}", channel.name);
-            self.process(cov, channel).await;
+            match &file_id {
+                Some(id) => self.process_id(&id, channel).await,
+                None => {
+                    file_id = Some(self.process_image(image, channel).await);
+                },
+            };
         }
     }
 }
@@ -328,6 +295,77 @@ async fn get_cov_data(client: &Client) -> BobCov {
     }
 
     bob_cov
+}
+
+fn make_image(cov: BobCov) -> Vec<u8> {
+    let width = 580;
+    let height = 800;
+    let mut img: image::RgbImage = image::ImageBuffer::new(width, height);
+    let font_pixel = image::Rgb([0xC0u8, 0xC0u8, 0xC0u8]);
+    let scale = rusttype::Scale {
+        x: 18.0,
+        y: 18.0,
+    };
+
+    let font = rusttype::FontCollection::from_bytes(Vec::from(include_bytes!("Inconsolata.ttf") as &[u8]))
+        .unwrap()
+        .into_font()
+        .unwrap();
+
+    let init_y = 50;
+    let region_x = 48;
+    let confirmed_x = 186;
+    let deaths_x = 266;
+    let deaths_percent_x = 346;
+    let recovered_x = 406;
+    let recovered_percent_x = 486;
+
+    let mut total = BobCovRegion {
+        region: "*".to_string(),
+        confirmed: 0,
+        deaths: 0,
+        recovered: 0,
+    };
+
+    for x in (region_x - 1) .. (width - region_x - 1) {
+        img.put_pixel(x, 49, font_pixel);
+    }
+
+    let mut draw_entry = |x, y, text: &str| imageproc::drawing::draw_text_mut(&mut img, font_pixel, x, y, scale, &font, text);
+    draw_entry(region_x, 30, "Region");
+    draw_entry(confirmed_x, 30, "   Cases");
+    draw_entry(deaths_x, 30, "    Dead");
+    draw_entry(deaths_percent_x, 30, "    %");
+    draw_entry(recovered_x, 30, "  Healed");
+    draw_entry(recovered_percent_x, 30, "    %");
+
+    let mut draw_region = |y, region: &BobCovRegion| {
+        draw_entry(region_x, y, &region.region);
+        draw_entry(confirmed_x, y, &format!("{:8}", region.confirmed));
+        draw_entry(deaths_x, y, &format!("{:8}", region.deaths));
+        draw_entry(deaths_percent_x, y, &format!("{:4.1}%", 100.0 * region.deaths as f64 / region.confirmed as f64));
+        draw_entry(recovered_x, y, &format!("{:8}", region.recovered));
+        draw_entry(recovered_percent_x, y, &format!("{:4.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64));
+    };
+
+    for (index, region) in cov.regions.iter().enumerate() {
+        let y = init_y + (index as u32 + 1) * 20;
+        if height - y < 50 {
+            break;
+        }
+
+        total.confirmed += region.confirmed;
+        total.deaths += region.deaths;
+        total.recovered += region.recovered;
+
+        draw_region(y, region);
+    }
+    draw_region(init_y, &total);
+
+    let mut buffer = Vec::new();
+    image::DynamicImage::ImageRgb8(img).write_to(&mut buffer, image::ImageOutputFormat::Png).unwrap();
+
+    buffer
 }
 
 #[tokio::main]
@@ -356,9 +394,10 @@ async fn main() {
         };
 
         let cov = get_cov_data(&client).await;
+        let image = make_image(cov);
 
         let service: Box<dyn Service<'_>> = Box::new(Telegram::new(key.to_string(), &client, test).await);
-        service.process(&cov).await;
+        service.process(&image).await;
 
         if test {
             break;
