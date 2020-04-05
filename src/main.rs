@@ -327,6 +327,8 @@ fn make_image(cov: BobCov) -> Vec<u8> {
         recovered: 0,
     };
 
+    let mut regions = vec!();
+
     for x in (region_x - 1) .. (width - region_x - 1) {
         img.put_pixel(x, 49, font_pixel);
     }
@@ -348,19 +350,24 @@ fn make_image(cov: BobCov) -> Vec<u8> {
         draw_entry(recovered_percent_x, y, &format!("{:4.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64));
     };
 
-    for (index, region) in cov.regions.iter().enumerate() {
-        let y = init_y + (index as u32 + 1) * 20;
-        if height - y < 50 {
-            break;
-        }
-
+    for region in cov.regions.iter() {
         total.confirmed += region.confirmed;
         total.deaths += region.deaths;
         total.recovered += region.recovered;
 
+        regions.push(region);
+    }
+    regions.push(&total);
+    regions.sort_unstable_by(|lhs, rhs| rhs.confirmed.cmp(&lhs.confirmed));
+
+    for (index, region) in regions.iter().enumerate() {
+        let y = init_y + (index as u32) * 20;
+        if height - y < 50 {
+            break;
+        }
+
         draw_region(y, region);
     }
-    draw_region(init_y, &total);
 
     let mut buffer = Vec::new();
     image::DynamicImage::ImageRgb8(img).write_to(&mut buffer, image::ImageOutputFormat::Png).unwrap();
