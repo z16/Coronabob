@@ -298,7 +298,7 @@ async fn get_cov_data(client: &Client) -> BobCov {
 }
 
 fn make_image(cov: BobCov) -> Vec<u8> {
-    let width = 580;
+    let width = 660;
     let height = 800;
     let mut img: image::RgbImage = image::ImageBuffer::new(width, height);
     let font_pixel = image::Rgb([0xC0u8, 0xC0u8, 0xC0u8]);
@@ -319,6 +319,7 @@ fn make_image(cov: BobCov) -> Vec<u8> {
     let deaths_percent_x = 346;
     let recovered_x = 406;
     let recovered_percent_x = 486;
+    let dr_ratio_x = 566;
 
     for x in (region_x - 1) .. (width - region_x - 1) {
         img.put_pixel(x, 49, font_pixel);
@@ -331,6 +332,7 @@ fn make_image(cov: BobCov) -> Vec<u8> {
     draw_entry(deaths_percent_x, 30, "    %");
     draw_entry(recovered_x, 30, "  Healed");
     draw_entry(recovered_percent_x, 30, "    %");
+    draw_entry(dr_ratio_x, 30, "D/H %");
 
     let mut draw_region = |y, region: &BobCovRegion| {
         draw_entry(region_x, y, &region.region);
@@ -339,6 +341,7 @@ fn make_image(cov: BobCov) -> Vec<u8> {
         draw_entry(deaths_percent_x, y, &format!("{:4.1}%", 100.0 * region.deaths as f64 / region.confirmed as f64));
         draw_entry(recovered_x, y, &format!("{:8}", region.recovered));
         draw_entry(recovered_percent_x, y, &format!("{:4.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64));
+        draw_entry(dr_ratio_x, y, &format!("{:4.1}%", 100.0 * region.deaths as f64 / (region.deaths + region.recovered) as f64));
     };
 
     let mut regions = vec!();
