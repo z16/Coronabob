@@ -298,7 +298,19 @@ async fn get_cov_data(client: &Client) -> BobCov {
 }
 
 fn make_image(cov: BobCov) -> Vec<u8> {
-    let width = 660;
+    let init_y = 50;
+    let init_x = 40;
+    let rank_x = init_x + 0;
+    let region_x = rank_x + 40;
+    let confirmed_x = region_x + 140;
+    let deaths_x = confirmed_x + 80;
+    let deaths_percent_x = deaths_x + 80;
+    let recovered_x = deaths_percent_x + 60;
+    let recovered_percent_x = recovered_x + 80;
+    let dr_ratio_x = recovered_percent_x + 80;
+    let end_x = dr_ratio_x + 50;
+
+    let width = end_x + init_x - 4;
     let height = 800;
     let mut img: image::RgbImage = image::ImageBuffer::new(width, height);
     let font_pixel = image::Rgb([0xC0u8, 0xC0u8, 0xC0u8]);
@@ -312,20 +324,12 @@ fn make_image(cov: BobCov) -> Vec<u8> {
         .into_font()
         .unwrap();
 
-    let init_y = 50;
-    let region_x = 48;
-    let confirmed_x = 186;
-    let deaths_x = 266;
-    let deaths_percent_x = 346;
-    let recovered_x = 406;
-    let recovered_percent_x = 486;
-    let dr_ratio_x = 566;
-
-    for x in (region_x - 1) .. (width - region_x - 1) {
+    for x in (init_x - 2) .. (width - init_x - 2) {
         img.put_pixel(x, 49, font_pixel);
     }
 
     let mut draw_entry = |x, y, text: &str| imageproc::drawing::draw_text_mut(&mut img, font_pixel, x, y, scale, &font, text);
+    draw_entry(rank_x, 30, " #");
     draw_entry(region_x, 30, "Region");
     draw_entry(confirmed_x, 30, "   Cases");
     draw_entry(deaths_x, 30, "    Dead");
@@ -334,7 +338,8 @@ fn make_image(cov: BobCov) -> Vec<u8> {
     draw_entry(recovered_percent_x, 30, "    %");
     draw_entry(dr_ratio_x, 30, "D/H %");
 
-    let mut draw_region = |y, region: &BobCovRegion| {
+    let mut draw_region = |y, index, region: &BobCovRegion| {
+        draw_entry(rank_x, y, &format!("{:2}", index));
         draw_entry(region_x, y, &region.region);
         draw_entry(confirmed_x, y, &format!("{:8}", region.confirmed));
         draw_entry(deaths_x, y, &format!("{:8}", region.deaths));
@@ -432,7 +437,7 @@ fn make_image(cov: BobCov) -> Vec<u8> {
             break;
         }
 
-        draw_region(y, region);
+        draw_region(y, index, region);
     }
 
     let mut buffer = Vec::new();
