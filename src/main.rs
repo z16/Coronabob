@@ -403,7 +403,22 @@ fn make_image(cov: BobCov) -> Vec<u8> {
     eu.insert("Spain".to_string());
     eu.insert("Sweden".to_string());
 
+    let mut sa = std::collections::HashSet::new();
+    sa.insert("Argentina".to_string());
+    sa.insert("Bolivia".to_string());
+    sa.insert("Brazil".to_string());
+    sa.insert("Chile".to_string());
+    sa.insert("Colombia".to_string());
+    sa.insert("Ecuador".to_string());
+    sa.insert("Guyana".to_string());
+    sa.insert("Paraguay".to_string());
+    sa.insert("Peru".to_string());
+    sa.insert("Suriname".to_string());
+    sa.insert("Uruguay".to_string());
+    sa.insert("Venezuela".to_string());
+
     groups.insert("EU".to_string(), eu);
+    groups.insert("South America".to_string(), sa);
 
     let mut group_regions = std::collections::HashMap::new();
 
