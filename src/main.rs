@@ -88,6 +88,8 @@ struct BobCovRegion {
     confirmed: i64,
     deaths: i64,
     recovered: i64,
+    #[serde(default)]
+    group: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -291,6 +293,7 @@ async fn get_cov_data(client: &Client) -> BobCov {
             confirmed: attribute.confirmed,
             deaths: attribute.deaths,
             recovered: attribute.recovered,
+            group: false,
         });
     }
 
@@ -314,6 +317,7 @@ fn make_image(cov: BobCov) -> Vec<u8> {
     let height = 800;
     let mut img: image::RgbImage = image::ImageBuffer::new(width, height);
     let font_pixel = image::Rgb([0xC0u8, 0xC0u8, 0xC0u8]);
+    let group_pixel = image::Rgb([0xFFu8, 0xA0u8, 0x60u8]);
     let scale = rusttype::Scale {
         x: 18.0,
         y: 18.0,
@@ -328,25 +332,34 @@ fn make_image(cov: BobCov) -> Vec<u8> {
         img.put_pixel(x, 49, font_pixel);
     }
 
-    let mut draw_entry = |x, y, text: &str| imageproc::drawing::draw_text_mut(&mut img, font_pixel, x, y, scale, &font, text);
-    draw_entry(rank_x, 30, " #");
-    draw_entry(region_x, 30, "Region");
-    draw_entry(confirmed_x, 30, "   Cases");
-    draw_entry(deaths_x, 30, "    Dead");
-    draw_entry(deaths_percent_x, 30, "    %");
-    draw_entry(recovered_x, 30, "  Healed");
-    draw_entry(recovered_percent_x, 30, "    %");
-    draw_entry(dr_ratio_x, 30, "D/H %");
+    let mut draw_entry_full = |x, y, text: &str, pixel| imageproc::drawing::draw_text_mut(&mut img, pixel, x, y, scale, &font, text);
+    let mut draw_entry_single = |x, y, text: &str| draw_entry_full(x, y, text, font_pixel);
 
+    draw_entry_single(rank_x, 30, " #");
+    draw_entry_single(region_x, 30, "Region");
+    draw_entry_single(confirmed_x, 30, "   Cases");
+    draw_entry_single(deaths_x, 30, "    Dead");
+    draw_entry_single(deaths_percent_x, 30, "    %");
+    draw_entry_single(recovered_x, 30, "  Healed");
+    draw_entry_single(recovered_percent_x, 30, "    %");
+    draw_entry_single(dr_ratio_x, 30, "D/H %");
+
+    let mut offset = 0;
     let mut draw_region = |y, index, region: &BobCovRegion| {
-        draw_entry(rank_x, y, &format!("{:2}", index));
-        draw_entry(region_x, y, &region.region);
-        draw_entry(confirmed_x, y, &format!("{:8}", region.confirmed));
-        draw_entry(deaths_x, y, &format!("{:8}", region.deaths));
-        draw_entry(deaths_percent_x, y, &format!("{:4.1}%", 100.0 * region.deaths as f64 / region.confirmed as f64));
-        draw_entry(recovered_x, y, &format!("{:8}", region.recovered));
-        draw_entry(recovered_percent_x, y, &format!("{:4.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64));
-        draw_entry(dr_ratio_x, y, &format!("{:4.1}%", 100.0 * region.deaths as f64 / (region.deaths + region.recovered) as f64));
+        let pixel = if region.group { group_pixel } else { font_pixel };
+        if region.group {
+            offset += 1;
+            draw_entry_full(rank_x, y, "", pixel);
+        } else {
+            draw_entry_full(rank_x, y, &format!("{:2}", index - offset + 1), pixel);
+        }
+        draw_entry_full(region_x, y, &region.region, pixel);
+        draw_entry_full(confirmed_x, y, &format!("{:8}", region.confirmed), pixel);
+        draw_entry_full(deaths_x, y, &format!("{:8}", region.deaths), pixel);
+        draw_entry_full(deaths_percent_x, y, &format!("{:4.1}%", 100.0 * region.deaths as f64 / region.confirmed as f64), pixel);
+        draw_entry_full(recovered_x, y, &format!("{:8}", region.recovered), pixel);
+        draw_entry_full(recovered_percent_x, y, &format!("{:4.1}%", 100.0 * region.recovered as f64 / region.confirmed as f64), pixel);
+        draw_entry_full(dr_ratio_x, y, &format!("{:4.1}%", 100.0 * region.deaths as f64 / (region.deaths + region.recovered) as f64), pixel);
     };
 
     let mut regions = vec!();
@@ -356,6 +369,7 @@ fn make_image(cov: BobCov) -> Vec<u8> {
         confirmed: 0,
         deaths: 0,
         recovered: 0,
+        group: true,
     };
 
     let mut groups = std::collections::HashMap::new();
@@ -399,6 +413,7 @@ fn make_image(cov: BobCov) -> Vec<u8> {
             confirmed: 0,
             deaths: 0,
             recovered: 0,
+            group: true,
         });
     }
 
