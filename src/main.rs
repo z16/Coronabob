@@ -51,7 +51,7 @@ struct TelegramMessage {
 #[derive(serde::Deserialize)]
 struct TelegramUpdate {
     //update_id: String,
-    message: TelegramMessage,
+    message: Option<TelegramMessage>,
 }
 
 #[derive(serde::Deserialize)]
@@ -65,11 +65,11 @@ struct CovAttribute {
     #[serde(rename = "Country_Region")]
     region: String,
     #[serde(rename = "Confirmed")]
-    confirmed: i64,
+    confirmed: Option<i64>,
     #[serde(rename = "Deaths")]
-    deaths: i64,
+    deaths: Option<i64>,
     #[serde(rename = "Recovered")]
-    recovered: i64,
+    recovered: Option<i64>,
 }
 
 #[derive(serde::Deserialize)]
@@ -187,7 +187,11 @@ impl<'a> Telegram<'_> {
 
         let updates: TelegramResponse<Vec<TelegramUpdate>> = client.get(&url(&base_url, "getUpdates")).await;
         for update in updates.result.unwrap().iter() {
-            let message = &update.message;
+            let message = match &update.message {
+                Some(value) => value,
+                None => continue,
+            };
+
             if message.date <= data.date {
                 continue;
             }
@@ -290,9 +294,9 @@ async fn get_cov_data(client: &Client) -> BobCov {
         let attribute = &feature.attributes;
         bob_cov.regions.push(BobCovRegion {
             region: attribute.region.clone(),
-            confirmed: attribute.confirmed,
-            deaths: attribute.deaths,
-            recovered: attribute.recovered,
+            confirmed: attribute.confirmed.unwrap_or(0),
+            deaths: attribute.deaths.unwrap_or(0),
+            recovered: attribute.recovered.unwrap_or(0),
             group: false,
         });
     }
